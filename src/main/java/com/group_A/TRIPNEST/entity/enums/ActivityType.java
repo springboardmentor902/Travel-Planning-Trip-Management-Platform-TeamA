@@ -1,3 +1,0 @@
-package com.group_A.TRIPNEST.entity.enums;
-
-public enum ActivityType { SIGHTSEEING, TRANSPORTATION, ACCOMMODATION, DINING, ADVENTURE, SHOPPING, OTHER }

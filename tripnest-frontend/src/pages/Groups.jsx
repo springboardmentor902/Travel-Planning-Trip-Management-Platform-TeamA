@@ -1,657 +1,767 @@
-import { useState, useEffect, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
-import Navbar from "../components/Navbar";
-import { groupAPI, tripAPI } from "../utils/api";
 
-const initialForm = {
-  name: "",
-  description: "",
-  tripId: "",
-};
+import { useCallback, useEffect, useState } from "react";
+import Navbar from "../components/Navbar";
+import groupService from "../services/groupService";
+import { tripAPI } from "../utils/api";
 
 const Groups = () => {
-  const navigate = useNavigate();
+    const [groups, setGroups] = useState([]);
+    const [trips, setTrips] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [loadingTrips, setLoadingTrips] = useState(false);
+    const [submitting, setSubmitting] = useState(false);
 
-  const [groups, setGroups] = useState([]);
-  const [trips, setTrips] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [search, setSearch] = useState("");
+    const [groupName, setGroupName] = useState("");
+    const [tripId, setTripId] = useState("");
+    const [inviteEmail, setInviteEmail] = useState("");
+    const [selectedGroup, setSelectedGroup] = useState(null);
 
-  const [showForm, setShowForm] = useState(false);
-  const [inviteGroupId, setInviteGroupId] = useState(null);
-  const [inviteEmail, setInviteEmail] = useState("");
+    const [error, setError] = useState("");
+    const [success, setSuccess] = useState("");
 
-  const [form, setForm] = useState(initialForm);
-  const [submitting, setSubmitting] = useState(false);
-  const [inviting, setInviting] = useState(false);
-  const [deletingId, setDeletingId] = useState(null);
-
-  const fetchData = useCallback(async () => {
-    try {
-      setError("");
-
-      const [groupRes, tripRes] = await Promise.all([
-        groupAPI.getAll(),
-        tripAPI.getAll(),
-      ]);
-
-      setGroups(groupRes.data || []);
-      setTrips(tripRes.data || []);
-    } catch (err) {
-      console.error("Failed to load groups:", err);
-      setError("Unable to load groups. Please try again.");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
-
-  const handleCreate = async (e) => {
-    e.preventDefault();
-    if (!form.name.trim()) return;
-
-    setSubmitting(true);
-
-    try {
-      await groupAPI.create({
-        name: form.name.trim(),
-        description: form.description.trim(),
-        tripId: form.tripId ? Number(form.tripId) : null,
-      });
-
-      setForm(initialForm);
-      setShowForm(false);
-      await fetchData();
-    } catch (err) {
-      alert(
+    const getErrorMessage = (err, fallback) =>
         err.response?.data?.message ||
-          err.response?.data?.error ||
-          "Failed to create group."
-      );
-    } finally {
-      setSubmitting(false);
+        err.response?.data?.error ||
+        fallback;
+
+    const getCurrentUserEmail = () => {
+        const directEmail = localStorage.getItem("email");
+
+        if (directEmail) {
+            return directEmail.trim().toLowerCase();
+        }
+
+        try {
+            const user = JSON.parse(
+                localStorage.getItem("user") || "null"
+            );
+
+            return user?.email
+                ? user.email.trim().toLowerCase()
+                : "";
+        } catch {
+            return "";
+        }
+    };
+
+    const getCurrentMembership = (group) => {
+        if (!Array.isArray(group?.members)) {
+            return null;
+        }
+
+        const email = getCurrentUserEmail();
+        if (!email) return null;
+
+        return (
+            group.members.find((member) => {
+                const memberEmail =
+                    member?.email ||
+                    member?.userEmail ||
+                    member?.user?.email ||
+                    "";
+
+                return (
+                    memberEmail.trim().toLowerCase() === email
+                );
+            }) || null
+        );
+    };
+
+    const isPending = (group) => {
+        const membership = getCurrentMembership(group);
+
+        return (
+            membership?.status?.toUpperCase() === "PENDING" ||
+            group?.status?.toUpperCase() === "PENDING" ||
+            group?.invitationStatus?.toUpperCase() === "PENDING"
+        );
+    };
+
+    const isGroupCreator = (group) => {
+        const email = getCurrentUserEmail();
+
+        const creatorEmail =
+            group?.createdBy?.email ||
+            group?.creator?.email ||
+            group?.createdByEmail ||
+            "";
+
+        return (
+            email !== "" &&
+            creatorEmail.toString().trim().toLowerCase() === email
+        );
+    };
+
+    const loadGroups = useCallback(async () => {
+        const response = await groupService.getAll();
+
+        setGroups(
+            Array.isArray(response.data) ? response.data : []
+        );
+    }, []);
+
+    const loadTrips = useCallback(async () => {
+        try {
+            setLoadingTrips(true);
+
+            const response = await tripAPI.getAll();
+
+            setTrips(
+                Array.isArray(response.data) ? response.data : []
+            );
+        } catch (err) {
+            console.error("Failed to load trips:", err);
+            setError(
+                getErrorMessage(err, "Unable to load your trips.")
+            );
+        } finally {
+            setLoadingTrips(false);
+        }
+    }, []);
+
+    const refreshPageData = useCallback(async () => {
+        setError("");
+
+        try {
+            await Promise.all([loadGroups(), loadTrips()]);
+        } catch (err) {
+            console.error("Failed to load groups:", err);
+            setError(
+                getErrorMessage(err, "Unable to load groups.")
+            );
+        } finally {
+            setLoading(false);
+        }
+    }, [loadGroups, loadTrips]);
+
+    useEffect(() => {
+        refreshPageData();
+    }, [refreshPageData]);
+
+    // ------------------------------------------------------------
+    // CREATE GROUP: A trip must be selected.
+    // ------------------------------------------------------------
+
+    const createGroup = async (e) => {
+        e.preventDefault();
+
+        if (!groupName.trim()) {
+            setError("Enter a group name.");
+            return;
+        }
+
+        if (!tripId) {
+            setError("Please select a trip for this group.");
+            return;
+        }
+
+        const selectedTrip = trips.find(
+            (trip) => String(trip.id) === String(tripId)
+        );
+
+        if (!selectedTrip) {
+            setError("Selected trip was not found. Refresh and try again.");
+            return;
+        }
+
+        try {
+            setSubmitting(true);
+            setError("");
+            setSuccess("");
+
+            const response = await groupService.create({
+                name: groupName.trim(),
+                tripId: Number(tripId),
+            });
+
+            console.log("Created group:", response.data);
+
+            setGroupName("");
+            setTripId("");
+
+            await loadGroups();
+
+            setSuccess(
+                `Group created and linked to "${selectedTrip.title}". You can now invite travellers.`
+            );
+        } catch (err) {
+            console.error("Group creation failed:", err);
+            setError(
+                getErrorMessage(err, "Failed to create group.")
+            );
+        } finally {
+            setSubmitting(false);
+        }
+    };
+
+    // ------------------------------------------------------------
+    // INVITE MEMBER
+    // ------------------------------------------------------------
+
+    const inviteMember = async (group) => {
+        if (!inviteEmail.trim()) {
+            setError("Enter your friend's email.");
+            return;
+        }
+
+        try {
+            setSubmitting(true);
+            setError("");
+            setSuccess("");
+
+            await groupService.invite(
+                group.id,
+                inviteEmail.trim()
+            );
+
+            setInviteEmail("");
+            setSelectedGroup(null);
+
+            await loadGroups();
+
+            setSuccess("Invitation sent successfully.");
+        } catch (err) {
+            console.error("Invitation failed:", err);
+            setError(
+                getErrorMessage(err, "Failed to send invitation.")
+            );
+        } finally {
+            setSubmitting(false);
+        }
+    };
+
+    // ------------------------------------------------------------
+    // ACCEPT INVITATION
+    // ------------------------------------------------------------
+
+    const acceptInvite = async (groupId) => {
+        try {
+            setSubmitting(true);
+            setError("");
+            setSuccess("");
+
+            await groupService.accept(groupId);
+
+            // Refresh the group membership and the trip list.
+            await Promise.all([loadGroups(), loadTrips()]);
+
+            setSuccess(
+                "Invitation accepted. Your linked trip list has been refreshed."
+            );
+        } catch (err) {
+            console.error("Accept invitation failed:", err);
+            setError(
+                getErrorMessage(err, "Failed to accept invitation.")
+            );
+        } finally {
+            setSubmitting(false);
+        }
+    };
+
+    // ------------------------------------------------------------
+    // DECLINE INVITATION
+    // ------------------------------------------------------------
+
+    const declineInvite = async (groupId) => {
+        try {
+            setSubmitting(true);
+            setError("");
+            setSuccess("");
+
+            await groupService.decline(groupId);
+            await loadGroups();
+
+            setSuccess("Invitation declined.");
+        } catch (err) {
+            console.error("Decline invitation failed:", err);
+            setError(
+                getErrorMessage(err, "Failed to decline invitation.")
+            );
+        } finally {
+            setSubmitting(false);
+        }
+    };
+
+    // ------------------------------------------------------------
+    // REMOVE MEMBER
+    // ------------------------------------------------------------
+
+    const removeMember = async (groupId, memberId) => {
+        if (!window.confirm("Remove this member from the group?")) {
+            return;
+        }
+
+        try {
+            setSubmitting(true);
+            setError("");
+            setSuccess("");
+
+            await groupService.removeMember(groupId, memberId);
+            await loadGroups();
+
+            setSuccess("Member removed successfully.");
+        } catch (err) {
+            console.error("Remove member failed:", err);
+            setError(
+                getErrorMessage(err, "Failed to remove member.")
+            );
+        } finally {
+            setSubmitting(false);
+        }
+    };
+
+    // ------------------------------------------------------------
+    // DELETE GROUP
+    // ------------------------------------------------------------
+
+    const deleteGroup = async (id) => {
+        if (!window.confirm("Delete this group?")) return;
+
+        try {
+            setSubmitting(true);
+            setError("");
+            setSuccess("");
+
+            await groupService.delete(id);
+
+            setGroups((previous) =>
+                previous.filter((group) => group.id !== id)
+            );
+
+            if (selectedGroup?.id === id) {
+                setSelectedGroup(null);
+            }
+
+            setSuccess("Group deleted successfully.");
+        } catch (err) {
+            console.error("Group delete failed:", err);
+            setError(
+                getErrorMessage(err, "Failed to delete group.")
+            );
+        } finally {
+            setSubmitting(false);
+        }
+    };
+
+    // ------------------------------------------------------------
+    // LOADING
+    // ------------------------------------------------------------
+
+    if (loading) {
+        return (
+            <div className="min-h-screen bg-slate-50">
+                <Navbar />
+                <main className="mx-auto max-w-7xl px-4 pt-24 pb-12 sm:px-6">
+                    <div className="mt-5 rounded-3xl border border-slate-200 bg-white p-12 text-center">
+                        <div className="animate-pulse text-4xl">👥</div>
+                        <p className="mt-4 text-slate-500">
+                            Loading groups...
+                        </p>
+                    </div>
+                </main>
+            </div>
+        );
     }
-  };
 
-  const handleInvite = async (e) => {
-    e.preventDefault();
-    if (!inviteGroupId || !inviteEmail.trim()) return;
-
-    setInviting(true);
-
-    try {
-      await groupAPI.invite(inviteGroupId, inviteEmail.trim());
-
-      setInviteGroupId(null);
-      setInviteEmail("");
-      alert("Invitation sent successfully!");
-      await fetchData();
-    } catch (err) {
-      alert(
-        err.response?.data?.message ||
-          err.response?.data?.error ||
-          "Failed to send invitation."
-      );
-    } finally {
-      setInviting(false);
-    }
-  };
-
-  const handleDelete = async (id) => {
-    if (!window.confirm("Are you sure you want to delete this group?")) {
-      return;
-    }
-
-    setDeletingId(id);
-
-    try {
-      await groupAPI.delete(id);
-      await fetchData();
-    } catch (err) {
-      alert(
-        err.response?.data?.message || "Failed to delete group."
-      );
-    } finally {
-      setDeletingId(null);
-    }
-  };
-
-  const filteredGroups = groups.filter((group) => {
-    const query = search.toLowerCase();
+    // ------------------------------------------------------------
+    // MAIN PAGE
+    // ------------------------------------------------------------
 
     return (
-      group.name?.toLowerCase().includes(query) ||
-      group.description?.toLowerCase().includes(query) ||
-      group.tripTitle?.toLowerCase().includes(query)
-    );
-  });
+        <div className="min-h-screen bg-slate-50">
+            <Navbar />
 
-  const totalMembers = groups.reduce(
-    (total, group) =>
-      total + (group.memberCount ?? group.members?.length ?? 0),
-    0
-  );
-
-  const closeCreateForm = () => {
-    setShowForm(false);
-    setForm(initialForm);
-  };
-
-  return (
-    <div className="min-h-screen bg-slate-50 text-slate-800">
-      <Navbar />
-
-      <main className="mx-auto max-w-6xl px-4 pb-12 pt-24 sm:px-6 sm:pt-28 lg:px-8">
-        {/* Header */}
-        <section className="mb-8 flex flex-col justify-between gap-5 sm:flex-row sm:items-center">
-          <div>
-            <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-blue-100 bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
-              <span className="h-2 w-2 rounded-full bg-blue-600" />
-              TRAVEL TOGETHER
-            </div>
-
-            <h1 className="text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
-              Travel Groups
-            </h1>
-
-            <p className="mt-2 max-w-xl text-sm leading-6 text-slate-500 sm:text-base">
-              Bring your travel companions together and organize your next
-              adventure in one place.
-            </p>
-          </div>
-
-          <button
-            onClick={() => setShowForm((prev) => !prev)}
-            className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-100"
-          >
-            <span className="text-lg leading-none">+</span>
-            Create Group
-          </button>
-        </section>
-
-        {/* Statistics */}
-        <section className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
-          {[
-            {
-              label: "Total Groups",
-              value: groups.length,
-              icon: "◎",
-              color: "bg-blue-50 text-blue-600",
-            },
-            {
-              label: "Group Members",
-              value: totalMembers,
-              icon: "♧",
-              color: "bg-indigo-50 text-indigo-600",
-            },
-            {
-              label: "Linked Trips",
-              value: groups.filter((group) => group.tripTitle).length,
-              icon: "↗",
-              color: "bg-violet-50 text-violet-600",
-            },
-          ].map((stat) => (
-            <div
-              key={stat.label}
-              className="flex items-center gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
-            >
-              <div
-                className={`flex h-12 w-12 items-center justify-center rounded-xl text-2xl ${stat.color}`}
-              >
-                {stat.icon}
-              </div>
-
-              <div>
-                <p className="text-sm font-medium text-slate-500">
-                  {stat.label}
-                </p>
-                <p className="mt-1 text-2xl font-bold text-slate-900">
-                  {loading ? "—" : stat.value}
-                </p>
-              </div>
-            </div>
-          ))}
-        </section>
-
-        {/* Create Group Form */}
-        {showForm && (
-          <section className="mb-8 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-            <div className="border-b border-slate-100 bg-gradient-to-r from-blue-50 to-indigo-50 px-5 py-5 sm:px-6">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-lg font-bold text-slate-900">
-                    Create a new group
-                  </h2>
-                  <p className="mt-1 text-sm text-slate-500">
-                    Set up a shared space for your travel companions.
-                  </p>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={closeCreateForm}
-                  aria-label="Close create group form"
-                  className="rounded-lg p-2 text-slate-500 transition hover:bg-white hover:text-slate-900"
-                >
-                  ✕
-                </button>
-              </div>
-            </div>
-
-            <form onSubmit={handleCreate} className="space-y-5 p-5 sm:p-6">
-              <div className="grid gap-5 sm:grid-cols-2">
-                <div>
-                  <label className="mb-2 block text-sm font-semibold text-slate-700">
-                    Group name <span className="text-red-500">*</span>
-                  </label>
-
-                  <input
-                    type="text"
-                    value={form.name}
-                    onChange={(e) =>
-                      setForm({ ...form, name: e.target.value })
-                    }
-                    placeholder="e.g. Manali Adventure"
-                    maxLength={100}
-                    required
-                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-50"
-                  />
-                </div>
-
-                <div>
-                  <label className="mb-2 block text-sm font-semibold text-slate-700">
-                    Connect a trip
-                  </label>
-
-                  <select
-                    value={form.tripId}
-                    onChange={(e) =>
-                      setForm({ ...form, tripId: e.target.value })
-                    }
-                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-50"
-                  >
-                    <option value="">No trip selected</option>
-
-                    {trips.map((trip) => (
-                      <option key={trip.id} value={trip.id}>
-                        {trip.title}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="mb-2 block text-sm font-semibold text-slate-700">
-                  Description
-                </label>
-
-                <textarea
-                  value={form.description}
-                  onChange={(e) =>
-                    setForm({ ...form, description: e.target.value })
-                  }
-                  placeholder="What is this group planning?"
-                  rows={3}
-                  maxLength={500}
-                  className="w-full resize-y rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-50"
-                />
-              </div>
-
-              <div className="flex flex-col-reverse gap-3 border-t border-slate-100 pt-5 sm:flex-row sm:justify-end">
-                <button
-                  type="button"
-                  onClick={closeCreateForm}
-                  className="rounded-xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
-                >
-                  Cancel
-                </button>
-
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="rounded-xl bg-blue-600 px-6 py-3 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {submitting ? "Creating..." : "Create Group"}
-                </button>
-              </div>
-            </form>
-          </section>
-        )}
-
-        {/* Search and list heading */}
-        <section className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h2 className="text-xl font-bold text-slate-900">
-              Your groups
-            </h2>
-            <p className="mt-1 text-sm text-slate-500">
-              {loading
-                ? "Loading your groups..."
-                : `${filteredGroups.length} ${
-                    filteredGroups.length === 1 ? "group" : "groups"
-                  } found`}
-            </p>
-          </div>
-
-          <div className="relative w-full sm:max-w-xs">
-            <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-lg text-slate-400">
-              ⌕
-            </span>
-
-            <input
-              type="search"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search groups..."
-              aria-label="Search groups"
-              className="w-full rounded-xl border border-slate-200 bg-white py-3 pl-10 pr-4 text-sm outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-50"
-            />
-          </div>
-        </section>
-
-        {/* Error State */}
-        {error && (
-          <div className="mb-5 flex flex-col gap-3 rounded-xl border border-red-100 bg-red-50 p-4 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-sm text-red-700">{error}</p>
-            <button
-              onClick={fetchData}
-              className="self-start text-sm font-semibold text-red-700 underline underline-offset-4"
-            >
-              Try again
-            </button>
-          </div>
-        )}
-
-        {/* Loading State */}
-        {loading ? (
-          <div className="grid gap-5 lg:grid-cols-2">
-            {[1, 2, 3, 4].map((item) => (
-              <div
-                key={item}
-                className="animate-pulse rounded-2xl border border-slate-200 bg-white p-6"
-              >
-                <div className="mb-4 flex gap-3">
-                  <div className="h-12 w-12 rounded-xl bg-slate-100" />
-                  <div className="flex-1 space-y-2 pt-1">
-                    <div className="h-4 w-2/3 rounded bg-slate-100" />
-                    <div className="h-3 w-1/3 rounded bg-slate-100" />
-                  </div>
-                </div>
-                <div className="mb-5 h-3 w-full rounded bg-slate-100" />
-                <div className="h-10 rounded-xl bg-slate-100" />
-              </div>
-            ))}
-          </div>
-        ) : filteredGroups.length === 0 ? (
-          /* Empty State */
-          <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-5 py-14 text-center sm:px-10">
-            <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-50 text-3xl">
-              {search ? "⌕" : "♧"}
-            </div>
-
-            <h3 className="text-lg font-bold text-slate-900">
-              {search ? "No matching groups" : "Your travel circle starts here"}
-            </h3>
-
-            <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-500">
-              {search
-                ? "Try a different search term to find your group."
-                : "Create a group, connect a trip, and invite the people you want to travel with."}
-            </p>
-
-            {!search && (
-              <button
-                onClick={() => setShowForm(true)}
-                className="mt-6 rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-700"
-              >
-                + Create your first group
-              </button>
-            )}
-          </div>
-        ) : (
-          /* Groups Grid */
-          <div className="grid items-start gap-5 lg:grid-cols-2">
-            {filteredGroups.map((group) => {
-              const members = group.members || [];
-              const memberCount =
-                group.memberCount ?? members.length;
-
-              return (
-                <article
-                  key={group.id}
-                  className="group overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition duration-200 hover:-translate-y-1 hover:border-blue-200 hover:shadow-lg"
-                >
-                  <div className="p-5 sm:p-6">
-                    {/* Card Header */}
-                    <div className="flex items-start gap-4">
-                      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 text-xl font-bold text-white shadow-sm">
-                        {group.name?.charAt(0)?.toUpperCase() || "G"}
-                      </div>
-
-                      <div className="min-w-0 flex-1">
-                        <h3 className="break-words text-lg font-bold text-slate-900 transition group-hover:text-blue-700">
-                          {group.name}
-                        </h3>
-
-                        <p className="mt-1 text-xs font-medium text-slate-400">
-                          {memberCount}{" "}
-                          {memberCount === 1 ? "member" : "members"}
-                        </p>
-                      </div>
-
-                      <span className="shrink-0 rounded-full border border-emerald-100 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
-                        Active
-                      </span>
-                    </div>
-
-                    {/* Description */}
-                    <p className="mt-4 min-h-10 text-sm leading-6 text-slate-500">
-                      {group.description || "A shared space for your next adventure."}
+            <main className="mx-auto max-w-7xl px-4 pt-24 pb-12 sm:px-6">
+                <section className="rounded-3xl bg-gradient-to-r from-violet-600 via-indigo-600 to-blue-600 p-7 text-white shadow-lg sm:p-10">
+                    <p className="text-sm font-semibold uppercase tracking-wide text-violet-100">
+                        👥 Group Travel
                     </p>
 
-                    {/* Linked Trip */}
-                    <div className="mt-4 flex items-center gap-3 rounded-xl bg-slate-50 px-4 py-3">
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white text-lg shadow-sm">
-                        ✈
-                      </div>
+                    <h1 className="mt-2 text-3xl font-bold sm:text-4xl">
+                        Travel Groups
+                    </h1>
 
-                      <div className="min-w-0">
-                        <p className="text-xs font-medium text-slate-400">
-                          Linked trip
-                        </p>
-                        <p className="truncate text-sm font-semibold text-slate-700">
-                          {group.tripTitle || "No trip linked"}
-                        </p>
-                      </div>
+                    <p className="mt-3 text-sm text-violet-100 sm:text-base">
+                        Link trips to groups, invite companions, and
+                        manage your travel members.
+                    </p>
+                </section>
+
+                {error && (
+                    <div className="mt-6 flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 p-4 text-red-700">
+                        <span>⚠️</span>
+                        <p>{error}</p>
                     </div>
+                )}
 
-                    {/* Members */}
-                    <div className="mt-5">
-                      <div className="mb-3 flex items-center justify-between">
-                        <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-                          Group members
-                        </p>
-                        <span className="text-xs text-slate-400">
-                          {members.length > 0
-                            ? `${members.length} shown`
-                            : "No member details"}
-                        </span>
-                      </div>
+                {success && (
+                    <div className="mt-6 flex items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-700">
+                        <span>✓</span>
+                        <p>{success}</p>
+                    </div>
+                )}
 
-                      {members.length > 0 ? (
-                        <div className="flex flex-wrap gap-2">
-                          {members.map((member) => {
-                            const email = member.email || "Member";
-                            const initial = email.charAt(0).toUpperCase();
+                {/* CREATE GROUP */}
 
-                            return (
-                              <div
-                                key={member.id ?? member.email}
-                                title={email}
-                                className="inline-flex max-w-full items-center gap-2 rounded-full border border-slate-100 bg-white py-1 pl-1 pr-3"
-                              >
-                                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-100 text-xs font-bold text-blue-700">
-                                  {initial}
-                                </div>
-
-                                <span className="max-w-36 truncate text-xs font-medium text-slate-600">
-                                  {email}
-                                </span>
-
-                                {member.role && (
-                                  <span
-                                    className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
-                                      member.role === "ADMIN"
-                                        ? "bg-blue-100 text-blue-700"
-                                        : "bg-slate-100 text-slate-500"
-                                    }`}
-                                  >
-                                    {member.role}
-                                  </span>
-                                )}
-
-                                {member.status === "PENDING" && (
-                                  <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
-                                    Pending
-                                  </span>
-                                )}
-                              </div>
-                            );
-                          })}
+                <section className="mt-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                    <div className="flex items-center gap-3">
+                        <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-violet-100 text-xl">
+                            👥
                         </div>
-                      ) : (
-                        <p className="text-xs text-slate-400">
-                          Invite people to start building your travel group.
-                        </p>
-                      )}
+
+                        <div>
+                            <h2 className="text-xl font-bold text-slate-800">
+                                Create a Group
+                            </h2>
+                            <p className="text-sm text-slate-500">
+                                Select the trip that this group will share.
+                            </p>
+                        </div>
                     </div>
-                  </div>
 
-                  {/* Card Actions */}
-                  <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 bg-slate-50/70 px-5 py-4 sm:px-6">
-                    <button
-                      onClick={() => setInviteGroupId(group.id)}
-                      className="inline-flex items-center gap-2 rounded-lg border border-blue-100 bg-blue-50 px-3.5 py-2 text-xs font-semibold text-blue-700 transition hover:border-blue-200 hover:bg-blue-100"
+                    <form
+                        onSubmit={createGroup}
+                        className="mt-6 grid gap-4 md:grid-cols-3"
                     >
-                      <span className="text-base">+</span>
-                      Invite member
-                    </button>
+                        <input
+                            value={groupName}
+                            onChange={(e) => setGroupName(e.target.value)}
+                            placeholder="Group name"
+                            required
+                            maxLength={100}
+                            className="rounded-xl border border-slate-200 px-4 py-3 outline-none focus:ring-2 focus:ring-violet-500"
+                        />
+
+                        <select
+                            value={tripId}
+                            onChange={(e) => setTripId(e.target.value)}
+                            required
+                            disabled={loadingTrips || trips.length === 0}
+                            className="rounded-xl border border-slate-200 px-4 py-3 outline-none focus:ring-2 focus:ring-violet-500"
+                        >
+                            <option value="">
+                                {loadingTrips
+                                    ? "Loading trips..."
+                                    : trips.length === 0
+                                        ? "No trips available"
+                                        : "Select a trip"}
+                            </option>
+
+                            {trips.map((trip) => (
+                                <option key={trip.id} value={trip.id}>
+                                    {trip.title || "Untitled trip"}
+                                    {trip.destination
+                                        ? ` — ${trip.destination}`
+                                        : ""}
+                                </option>
+                            ))}
+                        </select>
+
+                        <button
+                            type="submit"
+                            disabled={submitting || loadingTrips || trips.length === 0}
+                            className="rounded-xl bg-violet-600 px-5 py-3 font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                            {submitting ? "Please wait..." : "+ Create Group"}
+                        </button>
+                    </form>
+
+                    {trips.length === 0 && !loadingTrips && (
+                        <p className="mt-3 text-sm text-amber-700">
+                            Create a trip first, then return here to create
+                            its group.
+                        </p>
+                    )}
 
                     <button
-                      onClick={() => handleDelete(group.id)}
-                      disabled={deletingId === group.id}
-                      className="rounded-lg px-3 py-2 text-xs font-semibold text-slate-500 transition hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
+                        type="button"
+                        onClick={loadTrips}
+                        disabled={loadingTrips}
+                        className="mt-3 text-sm font-medium text-violet-700 hover:underline"
                     >
-                      {deletingId === group.id ? "Deleting..." : "Delete group"}
+                        {loadingTrips ? "Refreshing trips..." : "Refresh trips"}
                     </button>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        )}
-      </main>
+                </section>
 
-      {/* Invite Modal */}
-      {inviteGroupId && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4 backdrop-blur-sm"
-          onMouseDown={(e) => {
-            if (e.target === e.currentTarget && !inviting) {
-              setInviteGroupId(null);
-              setInviteEmail("");
-            }
-          }}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="invite-title"
-            className="w-full max-w-md rounded-2xl border border-slate-100 bg-white p-6 shadow-2xl sm:p-7"
-          >
-            <div className="mb-5 flex items-start justify-between gap-3">
-              <div>
-                <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-xl bg-blue-50 text-xl text-blue-700">
-                  ✉
-                </div>
+                {/* GROUP LIST */}
 
-                <h2
-                  id="invite-title"
-                  className="text-xl font-bold text-slate-900"
-                >
-                  Invite a member
-                </h2>
+                <section className="mt-10">
+                    <div className="flex items-center justify-between gap-4">
+                        <div>
+                            <h2 className="text-2xl font-bold text-slate-800">
+                                Your Groups
+                            </h2>
+                            <p className="mt-1 text-sm text-slate-500">
+                                Invite members and respond to invitations.
+                            </p>
+                        </div>
 
-                <p className="mt-1 text-sm leading-6 text-slate-500">
-                  Send an invitation to join your travel group.
-                </p>
-              </div>
+                        <span className="rounded-full bg-violet-100 px-3 py-1 text-sm font-semibold text-violet-700">
+                            {groups.length} group{groups.length !== 1 ? "s" : ""}
+                        </span>
+                    </div>
 
-              <button
-                type="button"
-                disabled={inviting}
-                onClick={() => {
-                  setInviteGroupId(null);
-                  setInviteEmail("");
-                }}
-                aria-label="Close invite modal"
-                className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
-              >
-                ✕
-              </button>
-            </div>
+                    {groups.length === 0 ? (
+                        <div className="mt-5 rounded-3xl border border-slate-200 bg-white p-12 text-center">
+                            <div className="text-6xl">🌍</div>
+                            <h3 className="mt-5 text-xl font-bold text-slate-800">
+                                No groups yet
+                            </h3>
+                            <p className="mt-2 text-sm text-slate-500">
+                                Create a group linked to a trip and invite
+                                your travel companions.
+                            </p>
+                        </div>
+                    ) : (
+                        <div className="mt-5 grid gap-6 lg:grid-cols-2">
+                            {groups.map((group) => {
+                                const pending = isPending(group);
+                                const membership = getCurrentMembership(group);
+                                const creator = isGroupCreator(group);
 
-            <form onSubmit={handleInvite}>
-              <label
-                htmlFor="invite-email"
-                className="mb-2 block text-sm font-semibold text-slate-700"
-              >
-                Email address
-              </label>
+                                const linkedTrip =
+                                    group.trip ||
+                                    group.tripResponse ||
+                                    null;
 
-              <input
-                id="invite-email"
-                type="email"
-                autoFocus
-                required
-                value={inviteEmail}
-                onChange={(e) => setInviteEmail(e.target.value)}
-                placeholder="friend@example.com"
-                className="mb-5 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-50"
-              />
+                                const linkedTripName = linkedTrip
+                                    ? `${linkedTrip.title || "Trip"}${linkedTrip.destination
+                                        ? ` — ${linkedTrip.destination}`
+                                        : ""
+                                    }`
+                                    : group.tripId
+                                        ? `Trip #${group.tripId}`
+                                        : "No trip linked";
 
-              <div className="flex flex-col-reverse gap-3 sm:flex-row">
-                <button
-                  type="button"
-                  disabled={inviting}
-                  onClick={() => {
-                    setInviteGroupId(null);
-                    setInviteEmail("");
-                  }}
-                  className="flex-1 rounded-xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
-                >
-                  Cancel
-                </button>
+                                return (
+                                    <div
+                                        key={group.id}
+                                        className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm transition hover:shadow-md"
+                                    >
+                                        <div className="flex justify-between gap-4">
+                                            <div className="flex items-center gap-3">
+                                                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-violet-100 text-xl">
+                                                    👥
+                                                </div>
 
-                <button
-                  type="submit"
-                  disabled={inviting}
-                  className="flex-1 rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {inviting ? "Sending..." : "Send invitation"}
-                </button>
-              </div>
-            </form>
-          </div>
+                                                <div>
+                                                    <h3 className="text-lg font-bold text-slate-800">
+                                                        {group.name || "Travel Group"}
+                                                    </h3>
+                                                    <p className="text-sm text-slate-500">
+                                                        Group #{group.id}
+                                                    </p>
+                                                </div>
+                                            </div>
+
+                                            {creator && (
+                                                <button
+                                                    type="button"
+                                                    disabled={submitting}
+                                                    onClick={() => deleteGroup(group.id)}
+                                                    className="text-sm font-semibold text-red-500 hover:text-red-700"
+                                                >
+                                                    Delete
+                                                </button>
+                                            )}
+                                        </div>
+
+                                        <div className="mt-5 rounded-2xl bg-indigo-50 p-4">
+                                            <p className="text-xs font-semibold uppercase tracking-wide text-indigo-500">
+                                                Linked trip
+                                            </p>
+                                            <p className="mt-1 font-semibold text-indigo-900">
+                                                {linkedTripName}
+                                            </p>
+                                        </div>
+
+                                        {/* PENDING INVITATION */}
+
+                                        {pending && (
+                                            <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-5">
+                                                <p className="font-semibold text-amber-800">
+                                                    📩 Group Invitation
+                                                </p>
+                                                <p className="mt-1 text-sm text-amber-700">
+                                                    You have been invited to join{" "}
+                                                    <strong>{group.name}</strong>.
+                                                </p>
+
+                                                <div className="mt-4 flex gap-3">
+                                                    <button
+                                                        type="button"
+                                                        disabled={submitting}
+                                                        onClick={() => acceptInvite(group.id)}
+                                                        className="rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+                                                    >
+                                                        ✓ Accept
+                                                    </button>
+
+                                                    <button
+                                                        type="button"
+                                                        disabled={submitting}
+                                                        onClick={() => declineInvite(group.id)}
+                                                        className="rounded-xl border border-red-200 bg-white px-5 py-2.5 text-sm font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50"
+                                                    >
+                                                        ✕ Decline
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* INVITE MEMBER */}
+
+                                        {!pending && creator && (
+                                            <div className="mt-6">
+                                                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                                                    Invite a member
+                                                </p>
+
+                                                <div className="flex gap-2">
+                                                    <input
+                                                        value={
+                                                            selectedGroup?.id === group.id
+                                                                ? inviteEmail
+                                                                : ""
+                                                        }
+                                                        onChange={(e) => {
+                                                            setSelectedGroup(group);
+                                                            setInviteEmail(e.target.value);
+                                                        }}
+                                                        placeholder="Friend's email"
+                                                        type="email"
+                                                        className="min-w-0 flex-1 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-violet-500"
+                                                    />
+
+                                                    <button
+                                                        type="button"
+                                                        disabled={submitting}
+                                                        onClick={() => inviteMember(group)}
+                                                        className="rounded-xl bg-violet-600 px-4 text-sm font-semibold text-white hover:bg-violet-700 disabled:opacity-50"
+                                                    >
+                                                        Invite
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* MEMBERS */}
+
+                                        {Array.isArray(group.members) &&
+                                            group.members.length > 0 && (
+                                                <div className="mt-6">
+                                                    <div className="flex items-center justify-between">
+                                                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                                                            Members
+                                                        </p>
+                                                        <span className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-600">
+                                                            {group.members.length}
+                                                        </span>
+                                                    </div>
+
+                                                    <div className="mt-3 space-y-2">
+                                                        {group.members.map((member) => {
+                                                            const email =
+                                                                member?.email ||
+                                                                member?.userEmail ||
+                                                                member?.user?.email ||
+                                                                "";
+
+                                                            const name =
+                                                                member?.name ||
+                                                                member?.user?.name ||
+                                                                email ||
+                                                                "Member";
+
+                                                            const status =
+                                                                member?.status?.toUpperCase() ||
+                                                                "";
+
+                                                            const currentUser =
+                                                                email &&
+                                                                email.trim().toLowerCase() ===
+                                                                getCurrentUserEmail();
+
+                                                            return (
+                                                                <div
+                                                                    key={
+                                                                        member.id ||
+                                                                        email ||
+                                                                        `${group.id}-${name}`
+                                                                    }
+                                                                    className="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-3"
+                                                                >
+                                                                    <div className="min-w-0">
+                                                                        <p className="truncate text-sm font-medium text-slate-700">
+                                                                            {name}
+                                                                            {currentUser ? " (You)" : ""}
+                                                                        </p>
+                                                                        {email && (
+                                                                            <p className="truncate text-xs text-slate-400">
+                                                                                {email}
+                                                                            </p>
+                                                                        )}
+                                                                    </div>
+
+                                                                    <div className="flex shrink-0 items-center gap-2">
+                                                                        {status === "PENDING" && (
+                                                                            <span className="rounded-full bg-amber-50 px-2 py-1 text-xs text-amber-600">
+                                                                                Pending
+                                                                            </span>
+                                                                        )}
+
+                                                                        {status === "ACCEPTED" && (
+                                                                            <span className="rounded-full bg-emerald-50 px-2 py-1 text-xs text-emerald-600">
+                                                                                Accepted
+                                                                            </span>
+                                                                        )}
+
+                                                                        {creator && member.id && !currentUser && (
+                                                                            <button
+                                                                                type="button"
+                                                                                disabled={submitting}
+                                                                                onClick={() =>
+                                                                                    removeMember(
+                                                                                        group.id,
+                                                                                        member.id
+                                                                                    )
+                                                                                }
+                                                                                className="text-xs text-red-500 hover:text-red-700"
+                                                                            >
+                                                                                Remove
+                                                                            </button>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                        {!group.members?.length && (
+                                            <div className="mt-6 rounded-2xl bg-slate-50 p-4 text-center">
+                                                <p className="text-sm text-slate-500">
+                                                    No members yet. Invite your
+                                                    friends to this group.
+                                                </p>
+                                            </div>
+                                        )}
+
+                                        {membership?.status?.toUpperCase() === "ACCEPTED" && (
+                                            <p className="mt-4 text-sm font-medium text-emerald-700">
+                                                ✓ You are a member of this group.
+                                            </p>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+                </section>
+            </main>
         </div>
-      )}
-    </div>
-  );
+    );
 };
 
 export default Groups;

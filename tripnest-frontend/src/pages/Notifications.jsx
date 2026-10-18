@@ -1,288 +1,544 @@
-import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import Navbar from '../components/Navbar';
-import { notificationAPI } from '../utils/api';
-
-const typeEmoji = {
-    TRIP_REMINDER:     '✈️',
-    ACTIVITY_REMINDER: '🗓️',
-    BUDGET_ALERT:      '💰',
-    GROUP_INVITATION:  '👥',
-    TRAVEL_UPDATE:     '🔄',
-    SYSTEM:            '🔔',
-};
-
-const typeLabel = {
-    TRIP_REMINDER:     'Trip Reminder',
-    ACTIVITY_REMINDER: 'Activity',
-    BUDGET_ALERT:      'Budget Alert',
-    GROUP_INVITATION:  'Group',
-    TRAVEL_UPDATE:     'Trip Update',
-    SYSTEM:            'System',
-};
+import React, { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import api from "../utils/api";
+import "./Notifications.css";
 
 const Notifications = () => {
     const navigate = useNavigate();
+
     const [notifications, setNotifications] = useState([]);
-    const [loading, setLoading]             = useState(true);
-    const [filter, setFilter]               = useState('ALL');
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState("");
+    const [markingAll, setMarkingAll] = useState(false);
 
-    useEffect(() => {
-        fetchNotifications();
-    }, []);
-
-    const fetchNotifications = async () => {
+    // ---------------------------------------------------------
+    // LOAD NOTIFICATIONS
+    // ---------------------------------------------------------
+    const loadNotifications = async () => {
         try {
-            const res = await notificationAPI.getAll();
-            setNotifications(res.data);
-        } catch {
-            console.error('Failed to load notifications');
+            setLoading(true);
+            setError("");
+
+            const response = await api.get("/api/notifications");
+
+            const data = Array.isArray(response.data)
+                ? response.data
+                : [];
+
+            setNotifications(data);
+        } catch (err) {
+            console.error("Failed to load notifications:", err);
+
+            if (err.response?.status === 401) {
+                setError("Your session has expired. Please login again.");
+            } else {
+                setError(
+                    err.response?.data?.message ||
+                    "Failed to load notifications."
+                );
+            }
         } finally {
             setLoading(false);
         }
     };
 
-    const handleMarkRead = async (id) => {
+    // ---------------------------------------------------------
+    // INITIAL LOAD
+    // ---------------------------------------------------------
+    useEffect(() => {
+        loadNotifications();
+    }, []);
+
+    // ---------------------------------------------------------
+    // MARK SINGLE NOTIFICATION AS READ
+    // ---------------------------------------------------------
+    const markAsRead = async (notification) => {
+        if (!notification || notification.read) {
+            return;
+        }
+
         try {
-            await notificationAPI.markRead(id);
-            setNotifications(prev =>
-                prev.map(n => n.id === id
-                    ? { ...n, isRead: true } : n));
-        } catch {}
+            await api.patch(
+                `/api/notifications/${notification.id}/read`
+            );
+
+            setNotifications((previous) =>
+                previous.map((item) =>
+                    item.id === notification.id
+                        ? { ...item, read: true }
+                        : item
+                )
+            );
+        } catch (err) {
+            console.error("Failed to mark notification as read:", err);
+        }
     };
 
-    const handleMarkAllRead = async () => {
+    // ---------------------------------------------------------
+    // MARK ALL AS READ
+    // ---------------------------------------------------------
+    const markAllAsRead = async () => {
+        if (notifications.length === 0) {
+            return;
+        }
+
+        const unreadExists = notifications.some(
+            (notification) => !notification.read
+        );
+
+        if (!unreadExists) {
+            return;
+        }
+
         try {
-            await notificationAPI.markAllRead();
-            setNotifications(prev =>
-                prev.map(n => ({ ...n, isRead: true })));
-        } catch {}
+            setMarkingAll(true);
+
+            await api.patch("/api/notifications/read-all");
+
+            setNotifications((previous) =>
+                previous.map((notification) => ({
+                    ...notification,
+                    read: true,
+                }))
+            );
+        } catch (err) {
+            console.error(
+                "Failed to mark all notifications as read:",
+                err
+            );
+
+            setError("Unable to mark all notifications as read.");
+        } finally {
+            setMarkingAll(false);
+        }
     };
 
-    const handleDelete = async (id) => {
+    // ---------------------------------------------------------
+    // DELETE NOTIFICATION
+    // ---------------------------------------------------------
+    const deleteNotification = async (id) => {
+        if (!id) {
+            return;
+        }
+
         try {
-            await notificationAPI.delete(id);
-            setNotifications(prev =>
-                prev.filter(n => n.id !== id));
-        } catch {}
+            await api.delete(`/api/notifications/${id}`);
+
+            setNotifications((previous) =>
+                previous.filter(
+                    (notification) => notification.id !== id
+                )
+            );
+        } catch (err) {
+            console.error(
+                "Failed to delete notification:",
+                err
+            );
+
+            setError("Unable to delete notification.");
+        }
     };
 
-    const handleClick = async (notif) => {
-        if (!notif.isRead) await handleMarkRead(notif.id);
-        if (notif.redirectUrl) navigate(notif.redirectUrl);
+    // ---------------------------------------------------------
+    // DELETE ALL LOCALLY
+    // ---------------------------------------------------------
+    const clearAllNotifications = async () => {
+        if (notifications.length === 0) {
+            return;
+        }
+
+        const confirmed = window.confirm(
+            "Are you sure you want to delete all notifications?"
+        );
+
+        if (!confirmed) {
+            return;
+        }
+
+        try {
+            // Backend currently provides delete-by-id,
+            // so delete each notification individually.
+            await Promise.all(
+                notifications.map((notification) =>
+                    api.delete(
+                        `/api/notifications/${notification.id}`
+                    )
+                )
+            );
+
+            setNotifications([]);
+        } catch (err) {
+            console.error(
+                "Failed to clear notifications:",
+                err
+            );
+
+            setError(
+                "Some notifications could not be deleted."
+            );
+
+            // Reload from backend to keep UI accurate.
+            loadNotifications();
+        }
     };
 
-    const formatTime = (dateStr) => {
-        if (!dateStr) return '';
-        const date = new Date(dateStr);
-        const now  = new Date();
-        const diff = Math.floor((now - date) / 1000);
-        if (diff < 60)    return 'Just now';
-        if (diff < 3600)  return Math.floor(diff/60) + 'm ago';
-        if (diff < 86400) return Math.floor(diff/3600) + 'h ago';
-        return date.toLocaleDateString('en-IN');
+    // ---------------------------------------------------------
+    // FORMAT DATE
+    // ---------------------------------------------------------
+    const formatDate = (dateValue) => {
+        if (!dateValue) {
+            return "";
+        }
+
+        const date = new Date(dateValue);
+
+        if (Number.isNaN(date.getTime())) {
+            return "";
+        }
+
+        return date.toLocaleString("en-IN", {
+            day: "2-digit",
+            month: "short",
+            year: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+        });
     };
 
-    const filters = ['ALL', 'UNREAD',
-        'TRIP_REMINDER', 'BUDGET_ALERT',
-        'GROUP_INVITATION', 'ACTIVITY_REMINDER'];
+    // ---------------------------------------------------------
+    // NOTIFICATION ICON
+    // ---------------------------------------------------------
+    const getNotificationIcon = (type) => {
+        switch (String(type || "").toUpperCase()) {
+            case "TRIP_REMINDER":
+                return "✈️";
 
-    const filtered = notifications.filter(n => {
-        if (filter === 'ALL')    return true;
-        if (filter === 'UNREAD') return !n.isRead;
-        return n.notificationType === filter;
-    });
+            case "ACTIVITY_REMINDER":
+                return "📅";
 
+            case "BUDGET_ALERT":
+                return "💰";
+
+            case "GROUP_INVITATION":
+                return "👥";
+
+            case "TRAVEL_UPDATE":
+                return "🌍";
+
+            case "SYSTEM":
+                return "🔔";
+
+            default:
+                return "🔔";
+        }
+    };
+
+    // ---------------------------------------------------------
+    // NOTIFICATION TYPE LABEL
+    // ---------------------------------------------------------
+    const getNotificationType = (type) => {
+        switch (String(type || "").toUpperCase()) {
+            case "TRIP_REMINDER":
+                return "Trip Reminder";
+
+            case "ACTIVITY_REMINDER":
+                return "Activity Reminder";
+
+            case "BUDGET_ALERT":
+                return "Budget Alert";
+
+            case "GROUP_INVITATION":
+                return "Group Invitation";
+
+            case "TRAVEL_UPDATE":
+                return "Travel Update";
+
+            case "SYSTEM":
+                return "System";
+
+            default:
+                return "Notification";
+        }
+    };
+
+    // ---------------------------------------------------------
+    // COUNTS
+    // ---------------------------------------------------------
     const unreadCount = notifications.filter(
-            n => !n.isRead).length;
+        (notification) => !notification.read
+    ).length;
 
+    // ---------------------------------------------------------
+    // LOADING
+    // ---------------------------------------------------------
+    if (loading) {
+        return (
+            <div className="notifications-page">
+                <div className="notifications-container">
+                    <div className="notifications-loading">
+                        <div className="notifications-spinner"></div>
+
+                        <h3>Loading notifications...</h3>
+
+                        <p>
+                            Please wait while we fetch your
+                            latest updates.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    // ---------------------------------------------------------
+    // PAGE
+    // ---------------------------------------------------------
     return (
-        <div className="min-h-screen bg-slate-50">
-            <Navbar />
+        <div className="notifications-page">
+            <div className="notifications-container">
 
-            <main className="max-w-3xl mx-auto px-4
-                             sm:px-6 pt-24 sm:pt-28 pb-12">
+                {/* HEADER */}
+                <div className="notifications-header">
 
-                {/* Header */}
-                <div className="flex justify-between
-                                items-center mb-6">
-                    <div>
-                        <h1 className="text-2xl font-bold
-                                       text-slate-900">
-                            Notifications 🔔
-                        </h1>
-                        <p className="text-sm text-slate-500 mt-1">
-                            {unreadCount > 0
-                                ? `${unreadCount} unread`
-                                : 'All caught up!'}
-                        </p>
-                    </div>
-                    {unreadCount > 0 && (
+                    <div className="notifications-title-section">
+
                         <button
-                            onClick={handleMarkAllRead}
-                            className="text-sm text-blue-600
-                                       hover:underline font-medium"
+                            className="notifications-back-button"
+                            onClick={() => navigate(-1)}
                         >
-                            Mark all read
+                            ← Back
                         </button>
-                    )}
-                </div>
 
-                {/* Filters */}
-                <div className="flex gap-2 flex-wrap mb-6">
-                    {filters.map(f => (
-                        <button
-                            key={f}
-                            onClick={() => setFilter(f)}
-                            className={`px-3 py-1.5 rounded-full
-                                text-xs font-semibold transition
-                                ${filter === f
-                                    ? 'bg-blue-600 text-white'
-                                    : 'bg-white border border-slate-200 text-slate-600 hover:border-blue-300'}`}
-                        >
-                            {f === 'ALL' ? 'All' :
-                             f === 'UNREAD' ? 'Unread' :
-                             typeLabel[f] || f}
-                        </button>
-                    ))}
-                </div>
+                        <div className="notifications-title-row">
+                            <div className="notifications-title-icon">
+                                🔔
+                            </div>
 
-                {/* Loading */}
-                {loading ? (
-                    <div className="space-y-3">
-                        {[1,2,3].map(i => (
-                            <div key={i}
-                                 className="bg-white rounded-2xl
-                                            p-4 animate-pulse h-20"/>
-                        ))}
+                            <div>
+                                <h1>Notifications</h1>
+
+                                <p>
+                                    Stay updated with your
+                                    trips and travel activities.
+                                </p>
+                            </div>
+                        </div>
                     </div>
 
-                ) : filtered.length === 0 ? (
+                    <div className="notifications-header-actions">
 
-                    /* Empty */
-                    <div className="bg-white border border-slate-200
-                                    rounded-2xl p-12 text-center">
-                        <div className="text-4xl mb-3">🔔</div>
-                        <p className="font-semibold text-slate-700">
-                            No notifications
-                        </p>
-                        <p className="text-sm text-slate-400 mt-1">
-                            {filter !== 'ALL'
-                                ? 'Try a different filter'
-                                : 'You are all caught up!'}
-                        </p>
-                    </div>
-
-                ) : (
-
-                    /* List */
-                    <div className="space-y-2">
-                        {filtered.map(notif => (
-                            <div
-                                key={notif.id}
-                                className={`bg-white border
-                                    rounded-2xl p-4 transition
-                                    ${!notif.isRead
-                                        ? 'border-blue-200 bg-blue-50/30'
-                                        : 'border-slate-200'}
-                                    ${notif.redirectUrl
-                                        ? 'cursor-pointer hover:border-blue-300 hover:shadow-sm'
-                                        : ''}`}
-                                onClick={() =>
-                                    notif.redirectUrl &&
-                                    handleClick(notif)}
+                        {unreadCount > 0 && (
+                            <button
+                                className="mark-all-button"
+                                onClick={markAllAsRead}
+                                disabled={markingAll}
                             >
-                                <div className="flex items-start
-                                                gap-3">
+                                {markingAll
+                                    ? "Marking..."
+                                    : "✓ Mark all as read"}
+                            </button>
+                        )}
 
-                                    {/* Icon */}
-                                    <div className="w-10 h-10
-                                        shrink-0 rounded-xl
-                                        bg-slate-100 flex
-                                        items-center
-                                        justify-center text-xl">
-                                        {typeEmoji[
-                                            notif.notificationType]
-                                            || '🔔'}
-                                    </div>
+                        {notifications.length > 0 && (
+                            <button
+                                className="clear-all-button"
+                                onClick={clearAllNotifications}
+                            >
+                                🗑 Clear all
+                            </button>
+                        )}
+                    </div>
+                </div>
 
-                                    {/* Content */}
-                                    <div className="flex-1 min-w-0">
-                                        <p className={`text-sm
-                                            leading-relaxed
-                                            ${!notif.isRead
-                                                ? 'text-slate-900 font-medium'
-                                                : 'text-slate-600'}`}>
-                                            {notif.message}
-                                        </p>
+                {/* ERROR */}
+                {error && (
+                    <div className="notifications-error">
+                        <span>⚠️</span>
+                        <span>{error}</span>
 
-                                        <div className="flex
-                                            items-center gap-3 mt-2">
-                                            <span className="text-[10px]
-                                                text-slate-400">
-                                                {formatTime(
-                                                    notif.createdAt)}
-                                            </span>
-                                            <span className="text-[10px]
-                                                bg-slate-100
-                                                text-slate-500
-                                                px-2 py-0.5
-                                                rounded-full">
-                                                {typeLabel[
-                                                    notif
-                                                    .notificationType]
-                                                    || 'System'}
-                                            </span>
-                                            {notif.redirectUrl && (
-                                                <span className="text-[10px]
-                                                    text-blue-500
-                                                    font-medium">
-                                                    Click to view →
-                                                </span>
+                        <button
+                            onClick={() => {
+                                setError("");
+                                loadNotifications();
+                            }}
+                        >
+                            Retry
+                        </button>
+                    </div>
+                )}
+
+                {/* SUMMARY */}
+                <div className="notifications-summary">
+
+                    <div className="summary-card">
+                        <div className="summary-icon">
+                            🔔
+                        </div>
+
+                        <div>
+                            <span className="summary-label">
+                                Total
+                            </span>
+
+                            <strong>
+                                {notifications.length}
+                            </strong>
+                        </div>
+                    </div>
+
+                    <div className="summary-card unread-summary">
+                        <div className="summary-icon">
+                            📩
+                        </div>
+
+                        <div>
+                            <span className="summary-label">
+                                Unread
+                            </span>
+
+                            <strong>
+                                {unreadCount}
+                            </strong>
+                        </div>
+                    </div>
+
+                    <div className="summary-card">
+                        <div className="summary-icon">
+                            ✅
+                        </div>
+
+                        <div>
+                            <span className="summary-label">
+                                Read
+                            </span>
+
+                            <strong>
+                                {notifications.length -
+                                    unreadCount}
+                            </strong>
+                        </div>
+                    </div>
+                </div>
+
+                {/* EMPTY STATE */}
+                {notifications.length === 0 ? (
+                    <div className="notifications-empty">
+
+                        <div className="empty-icon">
+                            🔔
+                        </div>
+
+                        <h2>No notifications yet</h2>
+
+                        <p>
+                            You're all caught up!
+                            New trip reminders, activity
+                            updates, budget alerts and other
+                            notifications will appear here.
+                        </p>
+
+                        <button
+                            className="empty-back-button"
+                            onClick={() => navigate("/trips")}
+                        >
+                            ✈️ Go to My Trips
+                        </button>
+                    </div>
+                ) : (
+                    /* NOTIFICATION LIST */
+                    <div className="notifications-list">
+
+                        {notifications.map((notification) => (
+                            <div
+                                key={notification.id}
+                                className={`notification-card ${notification.read
+                                        ? "notification-read"
+                                        : "notification-unread"
+                                    }`}
+                            >
+
+                                {/* ICON */}
+                                <div className="notification-icon">
+                                    {getNotificationIcon(
+                                        notification.type
+                                    )}
+                                </div>
+
+                                {/* CONTENT */}
+                                <div
+                                    className="notification-content"
+                                    onClick={() =>
+                                        markAsRead(notification)
+                                    }
+                                >
+                                    <div className="notification-top">
+
+                                        <div className="notification-title-wrapper">
+
+                                            <h3>
+                                                {notification.title ||
+                                                    "Notification"}
+                                            </h3>
+
+                                            {!notification.read && (
+                                                <span className="unread-dot"></span>
                                             )}
                                         </div>
+
+                                        <span className="notification-type">
+                                            {getNotificationType(
+                                                notification.type
+                                            )}
+                                        </span>
                                     </div>
 
-                                    {/* Actions */}
-                                    <div className="flex items-center
-                                                    gap-2 shrink-0"
-                                         onClick={e =>
-                                             e.stopPropagation()}>
-                                        {!notif.isRead && (
-                                            <button
-                                                onClick={() =>
-                                                    handleMarkRead(
-                                                        notif.id)}
-                                                className="text-[10px]
-                                                    text-blue-600
-                                                    hover:underline"
-                                            >
-                                                Read
-                                            </button>
+                                    <p className="notification-message">
+                                        {notification.message ||
+                                            "You have a new notification."}
+                                    </p>
+
+                                    <div className="notification-time">
+                                        🕒{" "}
+                                        {formatDate(
+                                            notification.createdAt
                                         )}
-                                        <button
-                                            onClick={() =>
-                                                handleDelete(notif.id)}
-                                            className="text-[10px]
-                                                text-red-400
-                                                hover:text-red-600"
-                                        >
-                                            Delete
-                                        </button>
                                     </div>
+                                </div>
 
-                                    {/* Unread dot */}
-                                    {!notif.isRead && (
-                                        <span className="w-2 h-2
-                                            bg-blue-500 rounded-full
-                                            shrink-0 mt-1" />
+                                {/* ACTIONS */}
+                                <div className="notification-actions">
+
+                                    {!notification.read && (
+                                        <button
+                                            className="read-button"
+                                            title="Mark as read"
+                                            onClick={() =>
+                                                markAsRead(
+                                                    notification
+                                                )
+                                            }
+                                        >
+                                            ✓
+                                        </button>
                                     )}
+
+                                    <button
+                                        className="delete-notification-button"
+                                        title="Delete notification"
+                                        onClick={() =>
+                                            deleteNotification(
+                                                notification.id
+                                            )
+                                        }
+                                    >
+                                        ×
+                                    </button>
                                 </div>
                             </div>
                         ))}
                     </div>
                 )}
-            </main>
+            </div>
         </div>
     );
 };

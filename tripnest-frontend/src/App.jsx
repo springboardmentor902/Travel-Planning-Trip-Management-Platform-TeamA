@@ -1,100 +1,185 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { AuthProvider } from './context/AuthContext';
-import { useAuth } from './context/AuthContext';
-import LandingPage    from './pages/LandingPage';
-import Login          from './pages/Login';
-import Register       from './pages/Register';
-import Dashboard      from './pages/Dashboard';
-import OAuth2Success  from './pages/OAuth2Success';
-import Trips          from './pages/Trips';
-import CreateTrip     from './pages/CreateTrip';
-import TripDetail     from './pages/TripDetail';
-import Destinations   from './pages/Destinations';
-import Budget         from './pages/Budget';
-import Expenses       from './pages/Expenses';
-import Groups         from './pages/Groups';
-import Notifications  from './pages/Notifications';
-import Documents from './pages/Documents';
-import Analytics from './pages/Analytics';
-import AdminDashboard from './pages/AdminDashboard';
-import TripReport     from './pages/TripReport';
-import Settlement  from './pages/Settlement';
-import TripExpenses from './pages/TripExpenses';
-import Profile from './pages/Profile';
 
+import React from "react";
+import { Routes, Route, Navigate } from "react-router-dom";
 
-const PrivateRoute = ({ children }) => {
-  const { user } = useAuth();
-  const token = localStorage.getItem('token');
-  if (!user && !token) return <Navigate to="/login" replace />;
-  return children;
-};
+// Authentication
+import Login from "./pages/Login";
+import Register from "./pages/Register";
+import OAuth2Success from "./pages/OAuth2Success";
 
-const AdminRoute = ({ children }) => {
-    const { user } = useAuth();
-    const token = localStorage.getItem('user');
-    const storedUser = token ? JSON.parse(token) : null;
-    const role = user?.role || storedUser?.role;
+// Main pages
+import LandingPage from "./pages/LandingPage";
+import Dashboard from "./pages/Dashboard";
+import Trips from "./pages/Trips";
+import CreateTrip from "./pages/CreateTrip";
+import TripDetail from "./pages/TripDetail";
+import Destinations from "./pages/Destinations";
 
-    if (role !== 'ADMIN') {
-        return <Navigate to="/dashboard" replace />;
-    }
-    return children;
-};
+// Trip features
+import Budget from "./pages/Budget";
+import Expenses from "./pages/Expenses";
+import Documents from "./pages/Documents";
+import Groups from "./pages/Groups";
+import Notifications from "./pages/Notifications";
 
-const AppRoutes = () => (
-  <Routes>
-    <Route path="/"               element={<LandingPage />} />
-    <Route path="/login"          element={<Login />} />
-    <Route path="/register"       element={<Register />} />
-    <Route path="/oauth2/success" element={<OAuth2Success />} />
+// Reports and analytics
+import Reports from "./pages/Reports";
+import TravelerAnalyticsPage from "./pages/TravelerAnalyticsPage";
 
-    <Route path="/dashboard" element={
-      <PrivateRoute><Dashboard /></PrivateRoute>} />
-    <Route path="/trips" element={
-      <PrivateRoute><Trips /></PrivateRoute>} />
-    <Route path="/trips/create" element={
-      <PrivateRoute><CreateTrip /></PrivateRoute>} />
-    <Route path="/trips/:id" element={
-      <PrivateRoute><TripDetail /></PrivateRoute>} />
-    <Route path="/destinations" element={
-      <PrivateRoute><Destinations /></PrivateRoute>} />
+// Admin
+import AdminDashboard from "./pages/AdminDashboard";
 
-    {/* ✅ Milestone 3 Routes */}
-    <Route path="/trips/:tripId/budget" element={
-      <PrivateRoute><Budget /></PrivateRoute>} />
-    <Route path="/trips/:tripId/expenses" element={
-      <PrivateRoute><Expenses /></PrivateRoute>} />
-    <Route path="/groups" element={
-      <PrivateRoute><Groups /></PrivateRoute>} />
-    <Route path="/notifications" element={
-      <PrivateRoute><Notifications /></PrivateRoute>} />
-    <Route path="/analytics" element={
-    <PrivateRoute><Analytics /></PrivateRoute>} />  
-    <Route path="/trips/:id/documents" element={
-    <PrivateRoute><Documents /></PrivateRoute>} />  
-    <Route path="/admin" element={
-    <AdminRoute><AdminDashboard /></AdminRoute>} />
-    <Route path="/reports/trips/:id" element={
-    <PrivateRoute><TripReport /></PrivateRoute>} />
-    <Route path="/trips/:id/settlement" element={
-    <PrivateRoute><Settlement /></PrivateRoute>} />
-    <Route path="/trips/:id/expenses" element={
-    <PrivateRoute><TripExpenses /></PrivateRoute>} />
-    <Route path="/profile" element={
-    <PrivateRoute><Profile /></PrivateRoute>} />
+// Route protection
+import RoleRoute from "./components/RoleRoute";
 
-  </Routes>
-);
-
-function App() {
+export default function App() {
   return (
-    <BrowserRouter>
-      <AuthProvider>
-        <AppRoutes />
-      </AuthProvider>
-    </BrowserRouter>
+    <Routes>
+      {/* Public routes */}
+      <Route path="/" element={<LandingPage />} />
+      <Route path="/login" element={<Login />} />
+      <Route path="/register" element={<Register />} />
+
+      {/* Google OAuth callback */}
+      <Route
+        path="/oauth2/success"
+        element={<OAuth2Success />}
+      />
+
+      {/* Website admin */}
+      <Route
+        path="/admin-dashboard"
+        element={
+          <RoleRoute allowedRoles={["ADMIN"]}>
+            <AdminDashboard />
+          </RoleRoute>
+        }
+      />
+
+      {/* Traveler and group-admin access */}
+      <Route
+        path="/dashboard"
+        element={
+          <RoleRoute allowedRoles={["TRAVELER", "GROUP_ADMIN"]}>
+            <Dashboard />
+          </RoleRoute>
+        }
+      />
+
+      <Route
+        path="/trips"
+        element={
+          <RoleRoute allowedRoles={["TRAVELER", "GROUP_ADMIN"]}>
+            <Trips />
+          </RoleRoute>
+        }
+      />
+
+      {/* Create a trip: no ID is required */}
+      <Route
+        path="/trips/create"
+        element={
+          <RoleRoute allowedRoles={["TRAVELER", "GROUP_ADMIN"]}>
+            <CreateTrip />
+          </RoleRoute>
+        }
+      />
+
+      {/* Trip detail uses useParams().id */}
+      <Route
+        path="/trips/:id"
+        element={
+          <RoleRoute allowedRoles={["TRAVELER", "GROUP_ADMIN"]}>
+            <TripDetail />
+          </RoleRoute>
+        }
+      />
+
+      {/* Budget uses useParams().tripId */}
+      <Route
+        path="/trips/:tripId/budget"
+        element={
+          <RoleRoute allowedRoles={["TRAVELER", "GROUP_ADMIN"]}>
+            <Budget />
+          </RoleRoute>
+        }
+      />
+
+      {/* Expenses uses useParams().tripId */}
+      <Route
+        path="/trips/:tripId/expenses"
+        element={
+          <RoleRoute allowedRoles={["TRAVELER", "GROUP_ADMIN"]}>
+            <Expenses />
+          </RoleRoute>
+        }
+      />
+
+      {/* Documents for a trip */}
+      <Route
+        path="/trips/:tripId/documents"
+        element={
+          <RoleRoute allowedRoles={["TRAVELER", "GROUP_ADMIN"]}>
+            <Documents />
+          </RoleRoute>
+        }
+      />
+
+      {/* Destinations */}
+      <Route
+        path="/destinations"
+        element={
+          <RoleRoute allowedRoles={["TRAVELER", "GROUP_ADMIN"]}>
+            <Destinations />
+          </RoleRoute>
+        }
+      />
+
+      {/* Groups */}
+      <Route
+        path="/groups"
+        element={
+          <RoleRoute allowedRoles={["TRAVELER", "GROUP_ADMIN"]}>
+            <Groups />
+          </RoleRoute>
+        }
+      />
+
+      {/* Notifications */}
+      <Route
+        path="/notifications"
+        element={
+          <RoleRoute allowedRoles={["TRAVELER", "GROUP_ADMIN"]}>
+            <Notifications />
+          </RoleRoute>
+        }
+      />
+
+      {/* Reports */}
+      <Route
+        path="/reports"
+        element={
+          <RoleRoute allowedRoles={["TRAVELER", "GROUP_ADMIN"]}>
+            <Reports />
+          </RoleRoute>
+        }
+      />
+
+      {/* Traveler analytics */}
+      <Route
+        path="/analytics"
+        element={
+          <RoleRoute allowedRoles={["TRAVELER", "GROUP_ADMIN"]}>
+            <TravelerAnalyticsPage />
+          </RoleRoute>
+        }
+      />
+
+      {/* Unknown routes */}
+      <Route
+        path="*"
+        element={<Navigate to="/" replace />}
+      />
+    </Routes>
   );
 }
-
-export default App;

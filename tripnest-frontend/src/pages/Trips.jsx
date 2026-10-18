@@ -1,56 +1,23 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import Navbar from "../components/Navbar";
-import PendingInvitations from "../components/PendingInvitations";
 import { tripAPI } from "../utils/api";
 
-const inputClass =
-  "rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10";
-
-const statusStyles = {
+const statusColors = {
   PLANNING: "bg-violet-50 text-violet-700 border-violet-200",
   UPCOMING: "bg-blue-50 text-blue-700 border-blue-200",
   ONGOING: "bg-emerald-50 text-emerald-700 border-emerald-200",
   COMPLETED: "bg-slate-100 text-slate-600 border-slate-200",
-  COMPLETE: "bg-slate-100 text-slate-600 border-slate-200",
   CANCELLED: "bg-red-50 text-red-600 border-red-200",
 };
 
 const statusIcons = {
-  PLANNING: "✎",
-  UPCOMING: "◷",
-  ONGOING: "↗",
+  PLANNING: "📝",
+  UPCOMING: "📅",
+  ONGOING: "🧭",
   COMPLETED: "✓",
-  COMPLETE: "✓",
   CANCELLED: "✕",
 };
-
-const formatDate = (date) => {
-  if (!date) return "Not set";
-
-  const value = String(date).slice(0, 10);
-  const parsed = new Date(`${value}T00:00:00`);
-
-  return Number.isNaN(parsed.getTime())
-    ? value
-    : parsed.toLocaleDateString("en-IN", {
-        day: "numeric",
-        month: "short",
-        year: "numeric",
-      });
-};
-
-const formatBudget = (budget) => {
-  if (budget == null || budget === "") return "Not set";
-
-  const amount = Number(budget);
-
-  return Number.isFinite(amount)
-    ? `₹${amount.toLocaleString("en-IN")}`
-    : "Not set";
-};
-
-const getTripId = (trip) => trip?.id ?? trip?._id;
 
 const Trips = () => {
   const navigate = useNavigate();
@@ -58,453 +25,366 @@ const Trips = () => {
   const [trips, setTrips] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [deletingId, setDeletingId] = useState(null);
-
-  const fetchTrips = useCallback(async () => {
-    setLoading(true);
-    setError("");
-
-    try {
-      const response = await tripAPI.getAll();
-      const data = response?.data;
-
-      setTrips(Array.isArray(data) ? data : []);
-    } catch (err) {
-      console.error("Trips load failed:", err);
-      setError(
-        err?.response?.data?.message ||
-          "Unable to load your trips. Please try again."
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, []);
 
   useEffect(() => {
     fetchTrips();
-  }, [fetchTrips]);
+  }, []);
 
-  const handleDelete = async (event, trip) => {
-    event.stopPropagation();
-
-    const id = getTripId(trip);
-
-    if (id == null || deletingId !== null) return;
-
-    const confirmed = window.confirm(
-      `Delete "${trip.title || "this trip"}"? This action cannot be undone.`
-    );
-
-    if (!confirmed) return;
-
-    setDeletingId(id);
-    setError("");
-
+  const fetchTrips = async () => {
     try {
-      await tripAPI.delete(id);
-      setTrips((previous) =>
-        previous.filter((item) => String(getTripId(item)) !== String(id))
-      );
+      const res = await tripAPI.getAll();
+      setTrips(res.data);
     } catch (err) {
-      console.error("Trip deletion failed:", err);
-      setError(
-        err?.response?.data?.message || "Unable to delete this trip."
-      );
+      console.error("Trips load failed:", err);
+      setError("Trips load nahi hui!");
     } finally {
-      setDeletingId(null);
+      setLoading(false);
     }
   };
 
-  const planningTrips = trips.filter(
-    (trip) => trip.status === "PLANNING"
-  );
+  const handleDelete = async (id) => {
+    if (!window.confirm("Trip delete karna chahte ho?")) return;
 
-  const upcomingTrips = trips.filter(
-    (trip) => trip.status === "UPCOMING"
-  );
+    try {
+      await tripAPI.delete(id);
+      setTrips((prev) => prev.filter((trip) => trip.id !== id));
+    } catch (err) {
+      console.error("Delete failed:", err);
+      alert("Delete failed!");
+    }
+  };
 
-  const completedTrips = trips.filter(
-    (trip) =>
-      trip.status === "COMPLETED" || trip.status === "COMPLETE"
-  );
+  const planningTrips = trips.filter((trip) => trip.status === "PLANNING");
 
-  const stats = [
-    {
-      label: "Total trips",
-      value: trips.length,
-      icon: "✈",
-      color: "text-blue-600",
-      bg: "bg-blue-50",
-    },
-    {
-      label: "Planning",
-      value: planningTrips.length,
-      icon: "✎",
-      color: "text-violet-600",
-      bg: "bg-violet-50",
-    },
-    {
-      label: "Upcoming",
-      value: upcomingTrips.length,
-      icon: "◷",
-      color: "text-sky-600",
-      bg: "bg-sky-50",
-    },
-    {
-      label: "Completed",
-      value: completedTrips.length,
-      icon: "✓",
-      color: "text-emerald-600",
-      bg: "bg-emerald-50",
-    },
-  ];
+  const upcomingTrips = trips.filter((trip) => trip.status === "UPCOMING");
 
-  return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
-      <Navbar />
+  const ongoingTrips = trips.filter((trip) => trip.status === "ONGOING");
 
-      <main className="mx-auto max-w-7xl px-4 pb-14 pt-28 sm:px-6 lg:px-8">
-        {/* Page heading */}
-        <div className="mb-8 flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <span className="inline-flex items-center gap-2 rounded-full border border-blue-100 bg-blue-50 px-3 py-1.5 text-xs font-semibold tracking-wide text-blue-700">
-              <span>✦</span> YOUR TRAVEL SPACE
-            </span>
+  const completedTrips = trips.filter((trip) => trip.status === "COMPLETED");
 
-            <h1 className="mt-4 text-3xl font-black tracking-tight sm:text-4xl">
-              My Trips
-            </h1>
+  // ============================================================
+  // LOADING
+  // ============================================================
 
-            <p className="mt-2 max-w-xl text-sm leading-6 text-slate-500 sm:text-base">
-              Plan your journeys, organize itineraries and keep every
-              adventure in one place.
-            </p>
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-50">
+        <Navbar />
+
+        <main className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 pt-28 pb-12">
+          <div className="mb-8">
+            <div className="h-8 w-40 rounded-lg bg-slate-200 animate-pulse" />
+            <div className="h-4 w-56 rounded bg-slate-200 animate-pulse mt-3" />
           </div>
 
-          <button
-            type="button"
-            onClick={() => navigate("/trips/create")}
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-3.5 text-sm font-semibold text-white shadow-lg shadow-blue-600/20 transition hover:-translate-y-0.5 hover:bg-blue-700"
-          >
-            <span className="text-lg">+</span> Create new trip
-          </button>
-        </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            {[1, 2, 3, 4].map((item) => (
+              <div
+                key={item}
+                className="bg-white border border-slate-200 rounded-2xl p-5 animate-pulse"
+              >
+                <div className="flex gap-4">
+                  <div className="w-14 h-14 rounded-2xl bg-slate-200" />
 
-        {/* Summary banner */}
-        <section className="relative mb-8 overflow-hidden rounded-3xl bg-gradient-to-br from-blue-600 via-indigo-600 to-violet-700 p-6 shadow-lg shadow-blue-600/10 sm:p-8">
-          <div className="absolute -right-12 -top-16 h-48 w-48 rounded-full bg-white/10" />
-          <div className="absolute -bottom-20 right-28 h-40 w-40 rounded-full bg-white/5" />
+                  <div className="flex-1">
+                    <div className="h-5 w-1/2 bg-slate-200 rounded" />
+                    <div className="h-3 w-1/3 bg-slate-200 rounded mt-3" />
+                  </div>
+                </div>
 
-          <div className="relative flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <span className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-100">
-                Your next adventure starts here
-              </span>
+                <div className="h-16 bg-slate-200 rounded-xl mt-5" />
+              </div>
+            ))}
+          </div>
+        </main>
+      </div>
+    );
+  }
 
-              <h2 className="mt-3 text-2xl font-black text-white sm:text-3xl">
-                Make every journey count.
-              </h2>
+  return (
+    <div className="min-h-screen bg-slate-50">
+      <Navbar />
 
-              <p className="mt-2 max-w-lg text-sm leading-6 text-blue-100">
-                {trips.length
-                  ? `You have ${trips.length} ${
-                      trips.length === 1 ? "trip" : "trips"
-                    } in your travel space. Keep your plans organized and ready.`
-                  : "Choose a destination and start building your next travel plan."}
-              </p>
-            </div>
+      <main className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 pt-24 sm:pt-28 pb-12">
+        {/* ======================================================
+            SIMPLE HEADER
+        ====================================================== */}
 
-            <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl border border-white/20 bg-white/10 text-3xl text-white backdrop-blur">
-              ✈
+        <section className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-blue-600 to-indigo-700 mb-8 shadow-lg shadow-blue-600/10">
+          {/* ONE IMAGE ONLY */}
+          <img
+            src="https://images.unsplash.com/photo-1500534623283-312aade485b7?auto=format&fit=crop&w=1400&q=80"
+            alt="Travel"
+            className="absolute inset-0 w-full h-full object-cover opacity-20"
+          />
+
+          <div className="absolute inset-0 bg-gradient-to-r from-blue-700/90 to-indigo-700/85" />
+
+          <div className="relative z-10 p-7 sm:p-9">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-6">
+              <div>
+                <div className="inline-flex items-center gap-2 bg-white/10 border border-white/20 rounded-full px-3 py-1.5 text-xs font-semibold text-white mb-4">
+                  🗺️ Your journeys
+                </div>
+
+                <h1 className="text-3xl sm:text-4xl font-bold text-white">
+                  My Trips
+                </h1>
+
+                <p className="text-blue-100 text-sm mt-2">
+                  {trips.length} trip
+                  {trips.length !== 1 ? "s" : ""} planned
+                </p>
+              </div>
+
+              <button
+                onClick={() => navigate("/trips/create")}
+                className="w-fit bg-white text-blue-700 px-5 py-3 rounded-xl text-sm font-bold shadow-lg hover:bg-blue-50 transition"
+              >
+                + New Trip
+              </button>
             </div>
           </div>
         </section>
 
-        {/* Error message */}
-        {error && (
-          <div
-            role="alert"
-            className="mb-6 flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 p-4"
-          >
-            <span className="text-lg">⚠</span>
+        {/* ======================================================
+            ERROR
+        ====================================================== */}
 
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-bold text-red-800">
-                Something went wrong
+        {error && (
+          <div className="mb-6 bg-red-50 border border-red-200 text-red-600 rounded-xl p-4 text-sm">
+            ⚠️ {error}
+          </div>
+        )}
+
+        {/* ======================================================
+            STATS
+        ====================================================== */}
+
+        {trips.length > 0 && (
+          <section className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+            <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+              <p className="text-xs text-slate-400 font-medium">Total Trips</p>
+
+              <p className="text-2xl font-bold text-slate-900 mt-1">
+                {trips.length}
               </p>
-              <p className="mt-1 break-words text-sm text-red-700">
-                {error}
+            </div>
+
+            <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+              <p className="text-xs text-slate-400 font-medium">Planning</p>
+
+              <p className="text-2xl font-bold text-violet-600 mt-1">
+                {planningTrips.length}
+              </p>
+            </div>
+
+            <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+              <p className="text-xs text-slate-400 font-medium">Upcoming</p>
+
+              <p className="text-2xl font-bold text-blue-600 mt-1">
+                {upcomingTrips.length}
+              </p>
+            </div>
+
+            <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+              <p className="text-xs text-slate-400 font-medium">Completed</p>
+
+              <p className="text-2xl font-bold text-emerald-600 mt-1">
+                {completedTrips.length}
+              </p>
+            </div>
+          </section>
+        )}
+
+        {/* ======================================================
+            TITLE
+        ====================================================== */}
+
+        <div className="flex items-end justify-between mb-5">
+          <div>
+            <h2 className="text-xl font-bold text-slate-900">All Trips</h2>
+
+            <p className="text-sm text-slate-500 mt-1">
+              Manage your planned journeys
+            </p>
+          </div>
+
+          {trips.length > 0 && (
+            <span className="text-xs text-slate-400">{trips.length} total</span>
+          )}
+        </div>
+
+        {/* ======================================================
+            EMPTY STATE
+        ====================================================== */}
+
+        {trips.length === 0 ? (
+          <div className="bg-white border border-slate-200 rounded-3xl p-10 sm:p-16 text-center shadow-sm">
+            <div className="w-20 h-20 mx-auto rounded-3xl bg-blue-50 flex items-center justify-center text-4xl">
+              ✈️
+            </div>
+
+            <h3 className="text-xl font-bold text-slate-900 mt-6">
+              Koi trip nahi hai abhi
+            </h3>
+
+            <p className="text-sm text-slate-500 max-w-md mx-auto mt-2">
+              Apni pehli trip plan karo aur apna next adventure organize karna
+              start karo.
+            </p>
+
+            <div className="flex flex-wrap justify-center gap-3 mt-6">
+              <button
+                onClick={() => navigate("/trips/create")}
+                className="bg-blue-600 text-white px-6 py-3 rounded-xl text-sm font-semibold hover:bg-blue-700 transition"
+              >
+                Create Trip
+              </button>
+
+              <button
+                onClick={() => navigate("/destinations")}
+                className="border border-slate-200 text-slate-700 px-6 py-3 rounded-xl text-sm font-semibold hover:bg-slate-50 transition"
+              >
+                Explore Destinations
+              </button>
+            </div>
+          </div>
+        ) : (
+          /* ====================================================
+             TRIPS
+          ==================================================== */
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            {trips.map((trip) => (
+              <div
+                key={trip.id}
+                onClick={() => navigate(`/trips/${trip.id}`)}
+                className="group bg-white border border-slate-200 rounded-2xl p-5 cursor-pointer hover:border-blue-200 hover:shadow-lg hover:-translate-y-1 transition-all duration-300"
+              >
+                {/* Header */}
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex items-center gap-4 min-w-0">
+                    {/* Simple icon */}
+                    <div className="w-14 h-14 shrink-0 rounded-2xl bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center text-2xl group-hover:scale-105 transition">
+                      ✈️
+                    </div>
+
+                    <div className="min-w-0">
+                      <h3 className="font-bold text-slate-900 text-lg truncate">
+                        {trip.title || "Untitled Trip"}
+                      </h3>
+
+                      <p className="text-sm text-slate-500 mt-1 truncate">
+                        📍 {trip.destination || "Unknown destination"}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Status */}
+                  <span
+                    className={`shrink-0 inline-flex items-center gap-1.5 text-[10px] px-2.5 py-1.5 rounded-full border font-bold ${
+                      statusColors[trip.status] ||
+                      "bg-slate-100 text-slate-600 border-slate-200"
+                    }`}
+                  >
+                    {statusIcons[trip.status] || "•"}
+                    {trip.status}
+                  </span>
+                </div>
+
+                {/* Info */}
+                <div className="grid grid-cols-3 gap-3 mt-5 pt-5 border-t border-slate-100">
+                  <div>
+                    <p className="text-[10px] uppercase tracking-wide text-slate-400 font-semibold">
+                      Start
+                    </p>
+
+                    <p className="text-sm font-semibold text-slate-700 mt-1 truncate">
+                      {trip.startDate || "—"}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="text-[10px] uppercase tracking-wide text-slate-400 font-semibold">
+                      End
+                    </p>
+
+                    <p className="text-sm font-semibold text-slate-700 mt-1 truncate">
+                      {trip.endDate || "—"}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="text-[10px] uppercase tracking-wide text-slate-400 font-semibold">
+                      Duration
+                    </p>
+
+                    <p className="text-sm font-semibold text-slate-700 mt-1">
+                      {trip.totalDays || "—"} days
+                    </p>
+                  </div>
+                </div>
+
+                {/* Budget */}
+                {trip.totalBudget && (
+                  <div className="mt-4 flex items-center justify-between bg-emerald-50 border border-emerald-100 rounded-xl px-4 py-3">
+                    <span className="text-xs font-medium text-slate-500">
+                      💰 Trip Budget
+                    </span>
+
+                    <span className="text-sm font-bold text-emerald-600">
+                      ₹{trip.totalBudget.toLocaleString()}
+                    </span>
+                  </div>
+                )}
+
+                {/* Actions */}
+                <div
+                  className="flex gap-2 mt-4 pt-4 border-t border-slate-100"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <button
+                    onClick={() => navigate(`/trips/${trip.id}`)}
+                    className="flex-1 py-2 rounded-xl border border-blue-200 text-blue-600 text-xs font-semibold hover:bg-blue-600 hover:text-white transition"
+                  >
+                    View Details →
+                  </button>
+
+                  <button
+                    onClick={() => handleDelete(trip.id)}
+                    className="px-4 py-2 rounded-xl border border-red-200 text-red-500 text-xs font-semibold hover:bg-red-50 transition"
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* ======================================================
+            BOTTOM CTA
+        ====================================================== */}
+
+        {trips.length > 0 && (
+          <section className="mt-10 bg-slate-900 rounded-3xl px-6 py-7 sm:px-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-5">
+            <div>
+              <h3 className="text-lg font-bold text-white">
+                Planning another adventure?
+              </h3>
+
+              <p className="text-sm text-slate-400 mt-1">
+                Create a new itinerary for your next journey.
               </p>
             </div>
 
             <button
-              type="button"
-              onClick={() => setError("")}
-              aria-label="Dismiss error"
-              className="text-red-500 hover:text-red-700"
+              onClick={() => navigate("/trips/create")}
+              className="shrink-0 bg-white text-slate-900 px-5 py-3 rounded-xl text-sm font-semibold hover:bg-blue-50 transition"
             >
-              ✕
+              + Create New Trip
             </button>
-          </div>
-        )}
-
-        {/* Statistics */}
-        {!loading && trips.length > 0 && (
-          <section className="mb-10 grid grid-cols-2 gap-4 lg:grid-cols-4">
-            {stats.map((stat) => (
-              <div
-                key={stat.label}
-                className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md sm:p-5"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-xs font-medium text-slate-500 sm:text-sm">
-                    {stat.label}
-                  </p>
-
-                  <span
-                    className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-lg ${stat.bg} ${stat.color}`}
-                  >
-                    {stat.icon}
-                  </span>
-                </div>
-
-                <p className={`mt-3 text-3xl font-black ${stat.color}`}>
-                  {stat.value}
-                </p>
-              </div>
-            ))}
-          </section>
-        )}
-
-        {/* Pending invitations */}
-        {!loading && (
-          <section className="mb-10">
-            <PendingInvitations />
-          </section>
-        )}
-
-        {/* Trips section heading */}
-        <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <h2 className="text-xl font-bold text-slate-900 sm:text-2xl">
-              All trips
-            </h2>
-            <p className="mt-1 text-sm text-slate-500">
-              Manage your planned journeys and travel details.
-            </p>
-          </div>
-
-          {!loading && (
-            <span className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600">
-              {trips.length} {trips.length === 1 ? "trip" : "trips"}
-            </span>
-          )}
-        </div>
-
-        {/* Loading skeleton */}
-        {loading ? (
-          <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
-            {[1, 2, 3, 4].map((item) => (
-              <div
-                key={item}
-                className="animate-pulse rounded-3xl border border-slate-200 bg-white p-6"
-              >
-                <div className="flex gap-4">
-                  <div className="h-12 w-12 rounded-2xl bg-slate-200" />
-                  <div className="flex-1 space-y-3">
-                    <div className="h-4 w-2/3 rounded bg-slate-200" />
-                    <div className="h-3 w-1/2 rounded bg-slate-100" />
-                  </div>
-                </div>
-                <div className="mt-6 h-20 rounded-xl bg-slate-100" />
-                <div className="mt-5 h-10 rounded-xl bg-slate-100" />
-              </div>
-            ))}
-          </div>
-        ) : trips.length === 0 ? (
-          /* Empty state */
-          <section className="rounded-3xl border border-slate-200 bg-white px-5 py-12 text-center shadow-sm sm:px-10 sm:py-16">
-            <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-3xl bg-blue-50 text-4xl">
-              ✈️
-            </div>
-
-            <h3 className="mt-6 text-xl font-bold text-slate-900">
-              No trips yet
-            </h3>
-
-            <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-500">
-              Your travel space is ready. Create your first trip and
-              start organizing your destination, dates and itinerary.
-            </p>
-
-            <div className="mt-6 flex flex-wrap justify-center gap-3">
-              <button
-                type="button"
-                onClick={() => navigate("/trips/create")}
-                className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-700"
-              >
-                + Create your first trip
-              </button>
-
-              <button
-                type="button"
-                onClick={() => navigate("/destinations")}
-                className="rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
-              >
-                Explore destinations
-              </button>
-            </div>
-          </section>
-        ) : (
-          /* Trip cards */
-          <section className="grid grid-cols-1 gap-5 md:grid-cols-2">
-            {trips.map((trip) => {
-              const id = getTripId(trip);
-              const status = String(trip.status || "PLANNING").toUpperCase();
-              const statusStyle =
-                statusStyles[status] ||
-                "border-slate-200 bg-slate-50 text-slate-600";
-
-              return (
-                <article
-                  key={id ?? trip.title}
-                  className="group min-w-0 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm transition duration-300 hover:-translate-y-1 hover:border-blue-200 hover:shadow-lg"
-                >
-                  {/* Card header */}
-                  <div className="p-5 sm:p-6">
-                    <div className="flex items-start gap-4">
-                      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-50 to-indigo-100 text-2xl transition group-hover:scale-105">
-                        ✈️
-                      </div>
-
-                      <div className="min-w-0 flex-1">
-                        <h3 className="break-words text-lg font-bold text-slate-900 transition group-hover:text-blue-700">
-                          {trip.title || "Untitled trip"}
-                        </h3>
-
-                        <p className="mt-1 truncate text-sm text-slate-500">
-                          <span className="mr-1">📍</span>
-                          {trip.destination || "Unknown destination"}
-                        </p>
-                      </div>
-
-                      <span
-                        className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-[10px] font-bold sm:text-xs ${statusStyle}`}
-                      >
-                        <span>{statusIcons[status] || "•"}</span>
-                        {status}
-                      </span>
-                    </div>
-
-                    {/* Trip information */}
-                    <div className="mt-6 grid grid-cols-2 gap-3 rounded-2xl bg-slate-50 p-4 sm:grid-cols-3">
-                      <div className="min-w-0">
-                        <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                          Start date
-                        </p>
-                        <p className="mt-1.5 truncate text-sm font-semibold text-slate-700">
-                          {formatDate(trip.startDate)}
-                        </p>
-                      </div>
-
-                      <div className="min-w-0">
-                        <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                          End date
-                        </p>
-                        <p className="mt-1.5 truncate text-sm font-semibold text-slate-700">
-                          {formatDate(trip.endDate)}
-                        </p>
-                      </div>
-
-                      <div className="col-span-2 border-t border-slate-200 pt-3 sm:col-span-1 sm:border-l sm:border-t-0 sm:pl-3 sm:pt-0">
-                        <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                          Duration
-                        </p>
-                        <p className="mt-1.5 text-sm font-semibold text-slate-700">
-                          {trip.totalDays != null
-                            ? `${trip.totalDays} days`
-                            : trip.startDate && trip.endDate
-                              ? `${Math.max(
-                                  1,
-                                  Math.round(
-                                    (new Date(
-                                      `${String(trip.endDate).slice(0, 10)}T00:00:00`
-                                    ) -
-                                      new Date(
-                                        `${String(trip.startDate).slice(0, 10)}T00:00:00`
-                                      )) /
-                                      86400000
-                                  ) + 1
-                                )} days`
-                              : "Not set"}
-                        </p>
-                      </div>
-                    </div>
-
-                    {/* Budget */}
-                    <div className="mt-4 flex items-center justify-between gap-3 rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3">
-                      <span className="text-xs font-medium text-slate-600">
-                        <span className="mr-2">₹</span>Trip budget
-                      </span>
-
-                      <span className="text-sm font-bold text-emerald-700">
-                        {formatBudget(trip.totalBudget)}
-                      </span>
-                    </div>
-
-                    {/* Actions */}
-                    <div className="mt-5 flex gap-3 border-t border-slate-100 pt-5">
-                      <button
-                        type="button"
-                        onClick={() => navigate(`/trips/${id}`)}
-                        disabled={id == null}
-                        className="flex-1 rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        View trip <span className="ml-1">→</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={(event) => handleDelete(event, trip)}
-                        disabled={id == null || deletingId !== null}
-                        className="rounded-xl border border-red-200 px-4 py-3 text-sm font-semibold text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {String(deletingId) === String(id)
-                          ? "Deleting..."
-                          : "Delete"}
-                      </button>
-                    </div>
-                  </div>
-                </article>
-              );
-            })}
-          </section>
-        )}
-
-        {/* Bottom call to action */}
-        {!loading && trips.length > 0 && (
-          <section className="relative mt-10 overflow-hidden rounded-3xl bg-slate-900 p-6 sm:p-8">
-            <div className="absolute -right-10 -top-12 h-36 w-36 rounded-full bg-blue-500/10" />
-
-            <div className="relative flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <h3 className="text-lg font-bold text-white">
-                  Planning another adventure?
-                </h3>
-
-                <p className="mt-2 text-sm leading-6 text-slate-400">
-                  Add a new destination and build your next itinerary.
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => navigate("/trips/create")}
-                className="shrink-0 rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-900 transition hover:bg-blue-50"
-              >
-                + Create new trip
-              </button>
-            </div>
           </section>
         )}
       </main>

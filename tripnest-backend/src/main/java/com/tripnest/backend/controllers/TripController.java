@@ -131,16 +131,12 @@ public class TripController {
 
     // ✅ Pending invitations
     @GetMapping("/invitations/pending")
-    public ResponseEntity<List<Map<String, Object>>>
-            getPendingInvitations() {
-        String email = SecurityContextHolder.getContext()
-                .getAuthentication().getName();
-        Long userId = userRepository.findByEmail(email)
-                .orElseThrow().getId();
+public ResponseEntity<List<Map<String, Object>>>
+        getPendingInvitations() {
 
-        List<Map<String, Object>> result =
-                tripService.getPendingInvitations(userId);
+    List<Map<String, Object>> result =
+            tripService.getPendingInvitations();
 
-        return ResponseEntity.ok(result);
-    }
+    return ResponseEntity.ok(result);
+}
 }

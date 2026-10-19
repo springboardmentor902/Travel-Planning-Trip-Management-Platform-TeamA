@@ -7,8 +7,7 @@ import org.springframework.data.repository.query.Param;
 
 import java.util.List;
 import java.util.Optional;
-import com.tripnest.backend.entity.User; 
-
+import com.tripnest.backend.entity.User;
 public interface GroupMemberRepository
         extends JpaRepository<GroupMember, Long> {
 

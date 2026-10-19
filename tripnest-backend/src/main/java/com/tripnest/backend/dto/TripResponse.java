@@ -15,6 +15,7 @@ public class TripResponse {
     private LocalDate startDate;
     private LocalDate endDate;
     private Double totalBudget;
+    private Integer travelers;
     private String description;
     private String coverImage;
     private Trip.TripStatus status;
@@ -33,6 +34,7 @@ public class TripResponse {
         res.setStartDate(trip.getStartDate());
         res.setEndDate(trip.getEndDate());
         res.setTotalBudget(trip.getTotalBudget());
+        res.setTravelers(trip.getTravelers());
         res.setDescription(trip.getDescription());
         res.setCoverImage(trip.getCoverImage());
         res.setStatus(trip.getStatus());

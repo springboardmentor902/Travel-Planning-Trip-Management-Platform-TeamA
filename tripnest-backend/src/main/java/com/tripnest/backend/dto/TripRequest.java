@@ -3,6 +3,8 @@ package com.tripnest.backend.dto;
 import com.tripnest.backend.entity.Trip;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.PositiveOrZero;
 import lombok.Data;
 
 import java.time.LocalDate;
@@ -22,7 +24,11 @@ public class TripRequest {
     @NotNull(message = "End date required")
     private LocalDate endDate;
 
+    @PositiveOrZero(message = "Budget cannot be negative")
     private Double totalBudget;
+
+    @Positive(message = "Travelers must be at least 1")
+    private Integer travelers;
     private String description;
     private String coverImage;
     private Trip.TripStatus status = Trip.TripStatus.PLANNING;
